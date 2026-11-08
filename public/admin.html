@@ -13,7 +13,10 @@ button{background:#e8edf7;color:#10131a;font-weight:800;border:0;cursor:pointer}
 .order{border-bottom:1px solid #30394a;padding:12px 0;line-height:1.6;overflow-wrap:anywhere}
 .small{color:#aab2c1;font-size:13px}.message{color:#f2c66d;min-height:20px}
 .actions{display:grid;grid-template-columns:1fr 1fr;gap:8px}
-a{color:#b9c7e5}
+a{color:#b9c7e5}.package-card{border:1px solid #30394a;border-radius:12px;padding:12px;margin:10px 0}
+.preview{width:100%;max-height:180px;object-fit:contain;background:#090b10;border-radius:9px;margin:6px 0}
+.danger{background:#51252b;color:#fff}.add-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+@media(max-width:480px){.add-grid{grid-template-columns:1fr}}
 </style>
 </head>
 <body><main>
@@ -27,7 +30,15 @@ a{color:#b9c7e5}
 <div id="message" class="message"></div>
 </section>
 <div id="dashboard" hidden>
-<section class="panel"><h2>Coin Package Prices (ETB)</h2><div id="packages">Loading…</div></section>
+<section class="panel">
+<h2>Add Coin Package</h2>
+<input id="newName" maxlength="60" placeholder="Package name (e.g. 1300 Coins)">
+<input id="newPrice" type="number" min="1" step="1" placeholder="Price in ETB">
+<label class="small" for="newImage">Package photo from Gallery (JPG, PNG, WEBP)</label>
+<input id="newImage" type="file" accept="image/jpeg,image/png,image/webp">
+<button id="addPackage" type="button">＋ Add Package</button>
+</section>
+<section class="panel"><h2>Coin Packages — Edit / Photo / Delete</h2><div id="packages">Loading…</div></section>
 <section class="panel"><h2>Customer Orders</h2><button id="refresh" type="button">Refresh Orders</button><div id="orders"></div></section>
 </div>
 <p class="small"><a href="/">Back to shop</a></p>
@@ -46,16 +57,52 @@ async function api(path,options={}){
  if(!r.ok)throw Error(data.error||"Request failed.");
  return data;
 }
+function readImage(file){
+ if(!file)return Promise.resolve("");
+ if(!["image/jpeg","image/png","image/webp"].includes(file.type))throw Error("Choose a JPG, PNG, or WEBP image.");
+ if(file.size>950*1024)throw Error("Choose an image smaller than 950 KB.");
+ return new Promise((resolve,reject)=>{
+  const reader=new FileReader();
+  reader.onload=()=>resolve(String(reader.result));
+  reader.onerror=()=>reject(Error("Could not read the image."));
+  reader.readAsDataURL(file);
+ });
+}
+function imageHtml(src){
+ return src ? `<img class="preview" src="${src}" alt="Package photo">` : `<p class="small">No photo uploaded</p>`;
+}
 async function loadPackages(){
  const data=await api("/api/admin/packages");
- document.getElementById("packages").innerHTML=data.packages.map((p,i)=>`
- <div class="row"><b>${p.name}</b><div><input aria-label="${p.name} price" id="price${i}" type="number" min="1" step="1" value="${p.price}" placeholder="ETB"></div>
- <button type="button" data-save="${i}" style="grid-column:1/-1">Save ${p.name} price</button></div>`).join("");
+ const el=document.getElementById("packages");
+ if(!data.packages.length){el.textContent="No packages yet.";return;}
+ el.innerHTML=data.packages.map((p,i)=>`
+ <div class="package-card">
+  <b>${escapeHtml(p.name)}</b>
+  ${imageHtml(p.imageData)}
+  <label class="small" for="price${i}">Price (ETB)</label>
+  <input aria-label="${escapeHtml(p.name)} price" id="price${i}" type="number" min="1" step="1" value="${p.price}">
+  <label class="small" for="image${i}">Change photo (optional)</label>
+  <input id="image${i}" type="file" accept="image/jpeg,image/png,image/webp">
+  <div class="actions">
+   <button type="button" data-save="${i}">Save Changes</button>
+   <button type="button" class="danger" data-delete="${i}">Delete</button>
+  </div>
+ </div>`).join("");
  data.packages.forEach((p,i)=>{
-  document.querySelector(`[data-save="${i}"]`).addEventListener("click",async()=>{
-   try{const price=Number(document.getElementById("price"+i).value);
-    await api("/api/admin/packages/"+encodeURIComponent(p.name),{method:"PUT",body:JSON.stringify({price})});
-    message.textContent=p.name+" price saved."; await loadPackages();
+  el.querySelector(`[data-save="${i}"]`).addEventListener("click",async()=>{
+   try{
+    const price=Number(document.getElementById("price"+i).value);
+    const file=document.getElementById("image"+i).files[0];
+    const body={price};
+    if(file)body.imageData=await readImage(file);
+    await api("/api/admin/packages/"+encodeURIComponent(p.name),{method:"PUT",body:JSON.stringify(body)});
+    message.textContent=p.name+" saved.";await loadPackages();
+   }catch(e){showError(e);}
+  });
+  el.querySelector(`[data-delete="${i}"]`).addEventListener("click",async()=>{
+   if(!confirm("Delete "+p.name+"?"))return;
+   try{await api("/api/admin/packages/"+encodeURIComponent(p.name),{method:"DELETE"});
+    message.textContent=p.name+" deleted.";await loadPackages();
    }catch(e){showError(e);}
   });
  });
@@ -65,7 +112,7 @@ async function loadOrders(){
  const el=document.getElementById("orders");
  if(!data.orders.length){el.textContent="No orders yet.";return;}
  el.innerHTML=data.orders.map(o=>`<div class="order">
- <b>Order #${o.id} — ${o.package_name}</b><br>
+ <b>Order #${o.id} — ${escapeHtml(o.package_name)}</b><br>
  Customer: ${escapeHtml(o.customer_name)}<br>
  Telegram ID: ${escapeHtml(o.telegram_id)}<br>
  Payment reference: ${escapeHtml(o.payment_reference)}<br>
@@ -73,11 +120,11 @@ async function loadOrders(){
  <span class="small">${escapeHtml(o.created_at)}</span>
  <div class="actions">
  <button type="button" data-id="${o.id}" data-status="paid">Confirm Paid</button>
- <button type="button" data-id="${o.id}" data-status="rejected">Reject</button>
+ <button type="button" class="danger" data-id="${o.id}" data-status="rejected">Reject</button>
  </div></div>`).join("");
  el.querySelectorAll("button[data-id]").forEach(btn=>btn.addEventListener("click",async()=>{
   try{await api("/api/admin/orders/"+btn.dataset.id+"/status",{method:"POST",body:JSON.stringify({status:btn.dataset.status})});
-   message.textContent="Order #"+btn.dataset.id+" updated."; await loadOrders();
+   message.textContent="Order #"+btn.dataset.id+" updated.";await loadOrders();
   }catch(e){showError(e);}
  }));
 }
@@ -88,6 +135,19 @@ async function login(){
  catch(e){dashboard.hidden=true;showError(e);}
 }
 document.getElementById("login").onclick=login;
+document.getElementById("addPackage").onclick=async()=>{
+ try{
+  const name=document.getElementById("newName").value.trim();
+  const price=Number(document.getElementById("newPrice").value);
+  const file=document.getElementById("newImage").files[0];
+  const imageData=await readImage(file);
+  await api("/api/admin/packages",{method:"POST",body:JSON.stringify({name,price,imageData})});
+  document.getElementById("newName").value="";
+  document.getElementById("newPrice").value="";
+  document.getElementById("newImage").value="";
+  message.textContent="Package added.";await loadPackages();
+ }catch(e){showError(e);}
+};
 document.getElementById("refresh").onclick=async()=>{try{await loadOrders();message.textContent="Orders refreshed.";}catch(e){showError(e);}};
 document.getElementById("logout").onclick=()=>{sessionStorage.removeItem("ghost_admin_key");adminKey="";keyInput.value="";dashboard.hidden=true;message.textContent="Logged out.";};
 if(adminKey)login();
