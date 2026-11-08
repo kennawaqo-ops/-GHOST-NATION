@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>GHOST_NATION | Admin</title>
+<style>
+:root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;background:#090b10;color:#f4f5f7;font:15px Arial,sans-serif}
+main{max-width:760px;margin:auto;padding:20px}.brand{font-size:25px;font-weight:900;letter-spacing:2px}
+.panel{background:#141923;border:1px solid #293142;border-radius:16px;padding:17px;margin:14px 0}
+h2{font-size:18px;margin:0 0 12px}input,button{width:100%;padding:13px;border-radius:10px;border:1px solid #384255;background:#0e131c;color:white;margin:6px 0;font-size:15px}
+button{background:#e8edf7;color:#10131a;font-weight:800;border:0;cursor:pointer}
+.row{display:grid;grid-template-columns:1fr 120px;gap:8px;align-items:center;border-bottom:1px solid #30394a;padding:9px 0}
+.order{border-bottom:1px solid #30394a;padding:12px 0;line-height:1.6;overflow-wrap:anywhere}
+.small{color:#aab2c1;font-size:13px}.message{color:#f2c66d;min-height:20px}
+.actions{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+a{color:#b9c7e5}
+</style>
+</head>
+<body><main>
+<div class="brand">亗 GHOST_NATION 亗</div>
+<p class="small">ADMIN CONTROL PANEL</p>
+<section class="panel">
+<h2>Admin Login</h2>
+<input id="adminKey" type="password" autocomplete="current-password" placeholder="Enter your ADMIN_KEY">
+<div class="actions"><button id="login">Login</button><button id="logout" type="button">Logout</button></div>
+<p class="small">Your admin key is sent securely to this site's server over HTTPS. Do not share it.</p>
+<div id="message" class="message"></div>
+</section>
+<div id="dashboard" hidden>
+<section class="panel"><h2>Coin Package Prices (ETB)</h2><div id="packages">Loading…</div></section>
+<section class="panel"><h2>Customer Orders</h2><button id="refresh" type="button">Refresh Orders</button><div id="orders"></div></section>
+</div>
+<p class="small"><a href="/">Back to shop</a></p>
+</main>
+<script>
+const keyInput=document.getElementById("adminKey");
+const message=document.getElementById("message");
+const dashboard=document.getElementById("dashboard");
+let adminKey=sessionStorage.getItem("ghost_admin_key")||"";
+keyInput.value=adminKey;
+function headers(){return {"Content-Type":"application/json","x-admin-key":adminKey};}
+function showError(e){message.textContent=e.message||"Something went wrong.";}
+async function api(path,options={}){
+ const r=await fetch(path,{...options,headers:{...headers(),...(options.headers||{})}});
+ const data=await r.json().catch(()=>({}));
+ if(!r.ok)throw Error(data.error||"Request failed.");
+ return data;
+}
+async function loadPackages(){
+ const data=await api("/api/admin/packages");
+ document.getElementById("packages").innerHTML=data.packages.map((p,i)=>`
+ <div class="row"><b>${p.name}</b><div><input aria-label="${p.name} price" id="price${i}" type="number" min="1" step="1" value="${p.price}" placeholder="ETB"></div>
+ <button type="button" data-save="${i}" style="grid-column:1/-1">Save ${p.name} price</button></div>`).join("");
+ data.packages.forEach((p,i)=>{
+  document.querySelector(`[data-save="${i}"]`).addEventListener("click",async()=>{
+   try{const price=Number(document.getElementById("price"+i).value);
+    await api("/api/admin/packages/"+encodeURIComponent(p.name),{method:"PUT",body:JSON.stringify({price})});
+    message.textContent=p.name+" price saved."; await loadPackages();
+   }catch(e){showError(e);}
+  });
+ });
+}
+async function loadOrders(){
+ const data=await api("/api/admin/orders");
+ const el=document.getElementById("orders");
+ if(!data.orders.length){el.textContent="No orders yet.";return;}
+ el.innerHTML=data.orders.map(o=>`<div class="order">
+ <b>Order #${o.id} — ${o.package_name}</b><br>
+ Customer: ${escapeHtml(o.customer_name)}<br>
+ Telegram ID: ${escapeHtml(o.telegram_id)}<br>
+ Payment reference: ${escapeHtml(o.payment_reference)}<br>
+ Status: <b>${escapeHtml(o.status)}</b><br>
+ <span class="small">${escapeHtml(o.created_at)}</span>
+ <div class="actions">
+ <button type="button" data-id="${o.id}" data-status="paid">Confirm Paid</button>
+ <button type="button" data-id="${o.id}" data-status="rejected">Reject</button>
+ </div></div>`).join("");
+ el.querySelectorAll("button[data-id]").forEach(btn=>btn.addEventListener("click",async()=>{
+  try{await api("/api/admin/orders/"+btn.dataset.id+"/status",{method:"POST",body:JSON.stringify({status:btn.dataset.status})});
+   message.textContent="Order #"+btn.dataset.id+" updated."; await loadOrders();
+  }catch(e){showError(e);}
+ }));
+}
+function escapeHtml(value){return String(value??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
+async function login(){
+ adminKey=keyInput.value.trim(); if(!adminKey){message.textContent="Enter your admin key.";return;}
+ try{await loadPackages();await loadOrders();sessionStorage.setItem("ghost_admin_key",adminKey);dashboard.hidden=false;message.textContent="Admin login successful.";}
+ catch(e){dashboard.hidden=true;showError(e);}
+}
+document.getElementById("login").onclick=login;
+document.getElementById("refresh").onclick=async()=>{try{await loadOrders();message.textContent="Orders refreshed.";}catch(e){showError(e);}};
+document.getElementById("logout").onclick=()=>{sessionStorage.removeItem("ghost_admin_key");adminKey="";keyInput.value="";dashboard.hidden=true;message.textContent="Logged out.";};
+if(adminKey)login();
+</script></body></html>
