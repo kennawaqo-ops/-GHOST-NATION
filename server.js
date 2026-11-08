@@ -12,6 +12,7 @@ db.exec(`
 CREATE TABLE IF NOT EXISTS orders (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   telegram_id TEXT NOT NULL,
+  telegram_username TEXT NOT NULL DEFAULT '',
   customer_name TEXT NOT NULL,
   package_name TEXT NOT NULL,
   payment_reference TEXT NOT NULL,
@@ -23,6 +24,27 @@ CREATE TABLE IF NOT EXISTS packages (
   price INTEGER NOT NULL DEFAULT 0
 );
 `);
+
+// Safe migration for databases created by an earlier version.
+const orderColumns = db.prepare("PRAGMA table_info(orders)").all().map(c => c.name);
+if (!orderColumns.includes("telegram_username")) {
+  db.exec("ALTER TABLE orders ADD COLUMN telegram_username TEXT NOT NULL DEFAULT ''");
+}
+
+async function sendTelegramMessage(chatId, text) {
+  if (!process.env.BOT_TOKEN || !chatId) return false;
+  try {
+    const response = await fetch(`https://api.telegram.org/bot${process.env.BOT_TOKEN}/sendMessage`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: String(chatId), text, disable_web_page_preview: true })
+    });
+    const result = await response.json();
+    return response.ok && result.ok === true;
+  } catch (error) {
+    console.error("Telegram notification failed:", error.message);
+    return false;
+  }
+}
 
 const defaultPackages = [
   ["100 Coins", 0],
@@ -98,10 +120,16 @@ app.post("/api/orders", getUser, (req, res) => {
     return res.status(400).json({ error: "This package is not available yet. Please contact the shop admin." });
   }
   const result = db.prepare(
-    "INSERT INTO orders (telegram_id, customer_name, package_name, payment_reference) VALUES (?, ?, ?, ?)"
-  ).run(String(req.telegramUser.id), String(customerName).slice(0, 80),
+    "INSERT INTO orders (telegram_id, telegram_username, customer_name, package_name, payment_reference) VALUES (?, ?, ?, ?, ?)"
+  ).run(String(req.telegramUser.id), String(req.telegramUser.username || ""), String(customerName).slice(0, 80),
         selectedPackage.name, String(paymentReference).slice(0, 120));
-  res.json({ ok: true, orderId: result.lastInsertRowid, status: "pending" });
+  const orderId = result.lastInsertRowid;
+  const username = req.telegramUser.username ? "@" + req.telegramUser.username : "Not provided";
+  const notice = `🛒 GHOST_NATION — New order #${orderId}\nCustomer: ${String(customerName).slice(0,80)}\nTelegram: ${username}\nPackage: ${selectedPackage.name}\nPayment reference: ${String(paymentReference).slice(0,120)}\nStatus: PENDING\n\nOpen Admin Panel: ${process.env.PUBLIC_URL || ""}/admin.html`;
+  if (process.env.ADMIN_TELEGRAM_ID) {
+    sendTelegramMessage(process.env.ADMIN_TELEGRAM_ID, notice).catch(() => {});
+  }
+  res.json({ ok: true, orderId, status: "pending" });
 });
 
 app.get("/api/orders", getUser, (req, res) => {
@@ -133,7 +161,13 @@ app.get("/api/admin/orders", adminOnly, (_req, res) => {
 app.post("/api/admin/orders/:id/status", adminOnly, (req, res) => {
   const status = ["pending", "paid", "rejected"].includes(req.body.status) ? req.body.status : null;
   if (!status) return res.status(400).json({ error: "Invalid status." });
+  const order = db.prepare("SELECT * FROM orders WHERE id = ?").get(req.params.id);
+  if (!order) return res.status(404).json({ error: "Order not found." });
   const result = db.prepare("UPDATE orders SET status = ? WHERE id = ?").run(status, req.params.id);
+  const customerMessage = status === "paid"
+    ? `✅ GHOST_NATION: Your order #${order.id} (${order.package_name}) has been approved. Contact @Ghosstt141 for the next step.`
+    : `❌ GHOST_NATION: Your order #${order.id} (${order.package_name}) was not approved. Please contact @Ghosstt141.`;
+  sendTelegramMessage(order.telegram_id, customerMessage).catch(() => {});
   res.json({ ok: result.changes > 0 });
 });
 
