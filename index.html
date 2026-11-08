@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>GHOST_NATION | eFootball Shop</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+:root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;background:#090b10;color:#f4f5f7;font:16px Arial,sans-serif}
+main{max-width:560px;margin:auto;padding:22px}.brand{font-size:27px;font-weight:900;letter-spacing:2px}
+.sub{color:#9ba3b4;margin:8px 0 24px}.panel{background:#141923;border:1px solid #293142;border-radius:18px;padding:18px;margin:14px 0}
+h2{font-size:18px;margin:0 0 14px}.package{display:flex;justify-content:space-between;align-items:center;padding:13px;border:1px solid #30394a;border-radius:12px;margin:9px 0}
+input,select,button{width:100%;padding:14px;border-radius:11px;border:1px solid #384255;background:#0e131c;color:white;margin:7px 0;font-size:15px}
+button{background:#e8edf7;color:#10131a;font-weight:800;border:0}.muted{color:#aab2c1;font-size:13px;line-height:1.5}.status{color:#f2c66d}
+</style>
+</head>
+<body><main>
+<div class="brand">亗 GHOST_NATION 亗</div>
+<div class="sub">RULE THE GAME • OWN THE VICTORY</div>
+<section class="panel"><h2>eFootball Coin Packages</h2><div id="packages" class="muted">Loading packages…</div></section>
+<section class="panel"><h2>Place an Order</h2>
+<form id="orderForm">
+<input id="customerName" placeholder="Your name" required maxlength="80">
+<select id="packageName" required><option value="">Choose a package</option></select>
+<p class="muted" id="paymentInfo">Loading payment instructions…</p>
+<input id="paymentReference" placeholder="Payment reference / transaction ID" required maxlength="120">
+<button type="submit">Submit Order</button>
+</form><p class="muted">Orders are pending until an administrator manually verifies payment.</p>
+<div id="message" class="status"></div></section>
+<section class="panel"><h2>My Orders</h2><button id="loadOrders" type="button">Refresh My Orders</button><div id="orders" class="muted"></div></section>
+<p class="muted">COD × FREE FIRE × PUBG × EFOOTBALL</p>
+</main>
+<script>
+const tg=window.Telegram?.WebApp; tg?.ready(); tg?.expand();
+const headers={"Content-Type":"application/json","x-telegram-init-data":tg?.initData||""};
+let packages=[];
+async function init(){
+ const r=await fetch("/api/config"); const c=await r.json(); packages=c.packages||[];
+ document.getElementById("packages").innerHTML=packages.map(p=>`<div class="package"><b>${p.name}</b><span>${p.price} ETB</span></div>`).join("");
+ document.getElementById("packageName").innerHTML='<option value="">Choose a package</option>'+packages.map(p=>`<option>${p.name}</option>`).join("");
+ document.getElementById("paymentInfo").textContent=`Pay via ${c.paymentProvider}: ${c.paymentName} — ${c.paymentNumber}. Currency: ETB.`;
+}
+document.getElementById("orderForm").addEventListener("submit",async e=>{
+ e.preventDefault(); const message=document.getElementById("message"); message.textContent="Submitting…";
+ try{const r=await fetch("/api/orders",{method:"POST",headers,body:JSON.stringify({
+ customerName:document.getElementById("customerName").value,
+ packageName:document.getElementById("packageName").value,
+ paymentReference:document.getElementById("paymentReference").value
+ })}); const d=await r.json(); if(!r.ok)throw Error(d.error||"Could not submit");
+ message.textContent=`Order #${d.orderId} submitted. Status: pending.`; e.target.reset(); loadOrders();
+ }catch(err){message.textContent=err.message;}
+});
+async function loadOrders(){const el=document.getElementById("orders");try{
+ const r=await fetch("/api/orders",{headers});const d=await r.json();if(!r.ok)throw Error(d.error);
+ el.innerHTML=d.orders.length?d.orders.map(o=>`<p>Order #${o.id} — ${o.package_name} — <b>${o.status}</b></p>`).join(""):"No orders yet.";
+ }catch(e){el.textContent=e.message;}}
+document.getElementById("loadOrders").onclick=loadOrders; init().catch(()=>document.getElementById("packages").textContent="Could not load packages.");
+</script></body></html>

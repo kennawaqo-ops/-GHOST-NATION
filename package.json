@@ -1,0 +1,13 @@
+{
+  "name": "ghost-nation-telegram-mini-app",
+  "version": "1.0.0",
+  "private": true,
+  "description": "GHOST_NATION eFootball shop Telegram Mini App starter",
+  "main": "server.js",
+  "scripts": { "start": "node server.js" },
+  "dependencies": {
+    "better-sqlite3": "^11.8.1",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2"
+  }
+}
