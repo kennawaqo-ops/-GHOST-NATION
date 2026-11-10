@@ -168,11 +168,7 @@ function dbError(error) {
 
 // Create default packages only when they do not already exist.
 async function initializePackages() {
-  const defaults = [
-    { name: "100 Coins", price: 0, image_data: "", sort_order: 1 },
-    { name: "550 Coins", price: 0, image_data: "", sort_order: 2 },
-    { name: "1040 Coins", price: 0, image_data: "", sort_order: 3 }
-  ];
+  const defaults = [];
 
   const { error } = await supabase
     .from("packages")
